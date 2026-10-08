@@ -90,6 +90,11 @@ Add the permissions, the audio service and the media button receiver to
 </manifest>
 ```
 
+`exported="true"` lets Android's media resumption controls and Android Auto
+connect to the service after the app has closed. If you don't want that, set
+`exported="false"` on both: the notification, lock screen and headset buttons
+keep working.
+
 If your stream is plain `http`, or redirects to `http` like many radio
 hosts do, allow cleartext for that host only. Don't turn it on for the whole
 app:
