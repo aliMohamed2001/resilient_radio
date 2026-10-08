@@ -75,6 +75,23 @@ void main() {
     });
   });
 
+  test('starting the service does not report a stop before loading', () {
+    fakeAsync((async) {
+      final engine = build();
+      final phases = <RadioPlaybackPhase>[];
+      engine.playback.listen((playback) => phases.add(playback.phase));
+
+      engine.play(station);
+      async.flushMicrotasks();
+
+      expect(phases, isNot(contains(RadioPlaybackPhase.idle)));
+      expect(phases.first, RadioPlaybackPhase.loading);
+      expect(phases.last, RadioPlaybackPhase.playing);
+      engine.dispose();
+      async.flushMicrotasks();
+    });
+  });
+
   test('a service that fails to start is reported and retried later', () {
     fakeAsync((async) {
       final engine = build();

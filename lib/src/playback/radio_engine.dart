@@ -89,7 +89,9 @@ class AudioServiceEngine implements RadioEngine {
     try {
       final handler = await _start().timeout(config.startTimeout);
       if (!_playback.isClosed) {
-        _playback.add(handler.current);
+        if (handler.current.phase != RadioPlaybackPhase.idle) {
+          _playback.add(handler.current);
+        }
         _relay = handler.playback.listen(_playback.add);
       }
       return handler;
