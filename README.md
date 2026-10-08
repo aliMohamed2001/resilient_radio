@@ -55,7 +55,7 @@ Playing after a reconnect · waiting for the network · `StreamProbe` reporting 
 | Platform | Status |
 |---|---|
 | Android | Tested on an Android 14 emulator, in the example app and in an app built on the package: playback, background audio, media buttons, network loss and recovery, stop. Not yet tested on a physical device. |
-| iOS | The CI workflow builds the example app for the iOS simulator on every push (`flutter build ios --simulator` on macOS); the CI badge shows the latest result. Not yet run on a simulator or a physical iPhone. |
+| iOS | Builds successfully in GitHub Actions (the example app, `flutter build ios --simulator` on macOS). Not yet run on a simulator; physical-device testing has not yet been performed. |
 | Web, desktop | Not supported. |
 
 The package's own tests (`flutter test`) run on every push with the minimum
