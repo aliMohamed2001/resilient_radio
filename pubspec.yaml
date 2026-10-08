@@ -9,6 +9,15 @@ topics:
   - streaming
   - live
   - background-audio
+screenshots:
+  - description: The example app losing the network and reconnecting on its own (Android emulator).
+    path: doc/demo.gif
+  - description: Playing after a reconnect, with the event log.
+    path: doc/playing.png
+  - description: Waiting for the network to come back.
+    path: doc/reconnecting.png
+  - description: StreamProbe reporting HTTP 404 for a URL that is not a stream.
+    path: doc/probe.png
 
 environment:
   sdk: ^3.6.0
@@ -27,7 +36,7 @@ dependencies:
   just_audio: ^0.10.5
 
 dev_dependencies:
-  fake_async: ^1.3.2
+  fake_async: ^1.3.1
   flutter_lints: ^5.0.0
   flutter_test:
     sdk: flutter

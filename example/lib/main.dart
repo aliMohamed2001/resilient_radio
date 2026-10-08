@@ -219,6 +219,8 @@ class _StatusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final failure = state.failure;
     final detail = switch (state.status) {
+      RadioStatus.reconnecting when failure == RadioFailure.noNetwork =>
+        'Waiting for the network to come back',
       RadioStatus.reconnecting =>
         'Attempt ${state.attempt} of ${state.maxAttempts}'
             '${failure == null ? '' : ': ${describeFailure(failure)}'}',

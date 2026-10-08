@@ -1,36 +1,65 @@
 # resilient_radio
 
+[![pub package](https://img.shields.io/pub/v/resilient_radio.svg)](https://pub.dev/packages/resilient_radio)
+[![CI](https://github.com/aliMohamed2001/resilient_radio/actions/workflows/ci.yml/badge.svg)](https://github.com/aliMohamed2001/resilient_radio/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A resilient live radio engine for Flutter.
 
 [just_audio](https://pub.dev/packages/just_audio) plays streams and
 [audio_service](https://pub.dev/packages/audio_service) keeps them playing in
-the background. Live radio brings problems neither of them handles for you:
-the stream drops when the phone switches networks, a café Wi-Fi has no
-internet behind it, the server answers 503 for a minute, a call interrupts
-playback, buffering never ends.
+the background. `resilient_radio` sits on top of both and handles what goes
+wrong with live streams: it reconnects with backoff, tells a dead network from
+a dead stream, and reports each failure as a type your UI can act on.
 
-`resilient_radio` sits on top of both and deals with that. It reconnects with
-backoff, tells a dead network from a dead stream, and reports what failed in
-terms your UI can show.
+## Demo
+
+<p>
+  <img src="https://raw.githubusercontent.com/aliMohamed2001/resilient_radio/main/doc/demo.gif" width="260" alt="The example app connecting, losing the network, reconnecting and playing again">
+</p>
+
+The example app on an Android 14 emulator: play, the network is switched off,
+the radio waits for it, and playback resumes on its own when it comes back.
+Recorded from the emulator screen at 1.5× speed.
+
+<p>
+  <img src="https://raw.githubusercontent.com/aliMohamed2001/resilient_radio/main/doc/playing.png" width="240" alt="Playing after a reconnect, with the event log">
+  <img src="https://raw.githubusercontent.com/aliMohamed2001/resilient_radio/main/doc/reconnecting.png" width="240" alt="Reconnecting while the device has no network">
+  <img src="https://raw.githubusercontent.com/aliMohamed2001/resilient_radio/main/doc/probe.png" width="240" alt="StreamProbe reporting HTTP 404 for a URL that is not a stream">
+</p>
+
+Playing after a reconnect · waiting for the network · `StreamProbe` reporting a
+404 for a URL that is not a stream.
 
 ## Features
 
 - Background playback with a media notification, lock screen and headset
   controls.
 - Three checks before blaming the stream: is there a network, does it reach
-  the internet, and what does the stream itself answer (HTTP status and
-  content type, after redirects).
+  the internet, and what does the stream answer (HTTP status and content
+  type, after redirects).
 - Automatic reconnect with configurable exponential backoff. While the device
-  is offline it waits for the network instead of burning attempts.
+  has no network, it waits for it instead of spending attempts.
 - Buffering that never ends counts as a drop, and a watchdog releases the
   device if audio never comes back.
-- Audio interruptions handled explicitly: ducking, calls, other apps,
-  headphones unplugged.
+- Interruptions handled explicitly: ducking, calls, other apps, headphones
+  unplugged.
 - A long pause reconnects to the live edge instead of playing stale audio.
-- Stop means stop: pending retries and attempts in flight are cancelled, and
-  late async results can't bring playback back.
-- Framework-neutral: an immutable state stream and a sealed event stream.
-  Works with Bloc, Riverpod, Provider, `ValueNotifier` or plain streams.
+- `stop()` cancels pending retries and attempts in flight; late async results
+  can't restart playback.
+- An immutable state stream and a sealed event stream, usable from Bloc,
+  Riverpod, Provider, `ValueNotifier` or plain streams.
+
+## Platform and testing status
+
+| Platform | Status |
+|---|---|
+| Android | Tested on an Android 14 emulator, in the example app and in an app built on the package: playback, background audio, media buttons, network loss and recovery, stop. Not yet tested on a physical device. |
+| iOS | The CI workflow builds the example app for the iOS simulator on every push (`flutter build ios --simulator` on macOS); the CI badge shows the latest result. Not yet run on a simulator or a physical iPhone. |
+| Web, desktop | Not supported. |
+
+The package's own tests (`flutter test`) run on every push with the minimum
+supported Flutter version (3.27.0) and the latest stable.
 
 ## Install
 
@@ -38,8 +67,6 @@ terms your UI can show.
 dependencies:
   resilient_radio: ^0.1.0
 ```
-
-## Platform setup
 
 ### Android
 
@@ -95,9 +122,8 @@ connect to the service after the app has closed. If you don't want that, set
 `exported="false"` on both: the notification, lock screen and headset buttons
 keep working.
 
-If your stream is plain `http`, or redirects to `http` like many radio
-hosts do, allow cleartext for that host only. Don't turn it on for the whole
-app:
+If a stream is plain `http`, or redirects to `http` as many radio hosts do,
+allow cleartext for that host only, not for the whole app:
 
 ```xml
 <!-- android/app/src/main/res/xml/network_security_config.xml -->
@@ -109,11 +135,9 @@ app:
 </network-security-config>
 ```
 
-and reference it from `<application android:networkSecurityConfig="@xml/network_security_config">`.
-The same rule applies to the stream probe, which runs on `dart:io`.
-
-On Android 13 and later the media notification shows without the
-notification permission.
+and reference it with `android:networkSecurityConfig="@xml/network_security_config"`
+on `<application>`. The stream probe runs on `dart:io` and follows the same
+rule.
 
 ### iOS
 
@@ -157,7 +181,6 @@ final radio = ResilientRadio(
     name: 'My Radio',
     description: 'Live',
     streamUrl: Uri.parse('https://example.com/live'),
-    artworkUrl: Uri.parse('https://example.com/logo.png'),
   ),
 );
 
@@ -167,8 +190,9 @@ await radio.stop();
 await radio.retry();
 ```
 
-Nothing touches the network or starts the audio service until `play()`.
-None of the methods throw: what happened ends up in the state and the events.
+Creating a radio starts nothing: the audio service starts on the first
+`play()`. `play()` doesn't throw; a failure ends up in the state and the
+events.
 
 ### State
 
@@ -190,7 +214,7 @@ StreamBuilder<RadioState>(
 );
 ```
 
-`stateStream` emits changes only. Read `radio.state` for the current value.
+`stateStream` emits changes only; read `radio.state` for the current value.
 
 ### Events
 
@@ -203,15 +227,11 @@ radio.eventStream.listen((event) {
       showOfflineDialog();
     case RadioReconnected(:final attempts):
       analytics.log('radio_reconnected', {'attempts': attempts});
-    case RadioFailed(:final failure, :final statusCode):
-      analytics.log('radio_failed', {'failure': failure.name, 'http': statusCode});
     default:
       break;
   }
 });
 ```
-
-`failureStream` carries only the `RadioFailed` events.
 
 | Event | When |
 |---|---|
@@ -225,90 +245,45 @@ radio.eventStream.listen((event) {
 | `RadioNetworkLost` / `RadioNetworkRestored` | the network changed while the radio was in use |
 | `RadioFailed` | a play request failed (`gaveUp: false`) or reconnecting gave up (`gaveUp: true`) |
 
-### Before playing
+`failureStream` carries only the `RadioFailed` events.
 
-Check the connection when a screen opens, to tell the user before they press
-play:
-
-```dart
-final offline = await radio.checkConnection();
-if (offline != null) showOfflineBanner(offline);
-```
-
-### Several stations
+### More
 
 ```dart
+final RadioFailure? offline = await radio.checkConnection();
 await radio.setStation(otherStation);
+
+final result = await StreamProbe().check(Uri.parse(userEnteredUrl));
+print('${result.statusCode} ${result.failure?.name}');
 ```
 
-If the radio is playing, the new station starts right away. Otherwise it
-plays on the next `play()`.
-
-### Checking a URL
-
-`StreamProbe` requests a URL the way the player will, which is handy for
-user-entered streams:
-
-```dart
-final result = await StreamProbe().check(Uri.parse(url));
-if (result.isPlayable) {
-  await radio.setStation(RadioStation(id: 'custom', name: 'Custom', streamUrl: Uri.parse(url)));
-} else {
-  print('${result.failure?.name}, HTTP ${result.statusCode}');
-}
-```
+`checkConnection()` returns why the device is offline, or null, so a screen
+can say so before the user presses play.
+`setStation()` starts the new station right away if the radio is in use.
+`StreamProbe` requests a URL the way the player will, which is useful for
+user-entered streams.
 
 ## How it recovers
 
-**On play.** The radio checks that the device has a network, then that the
-internet answers (a request to Google's and Cloudflare's `generate_204`
-endpoints, in parallel). If either fails it reports `noNetwork` or
-`internetUnavailable` without touching the stream. If the player then fails
-and the error doesn't say why, the stream URL itself is requested to get its
-HTTP status and content type. When the failure looks like a transport error,
-the internet is checked again, because it may have just dropped.
+On `play()`, the radio checks for a network, then for the internet (requests
+to Google's and Cloudflare's `generate_204` endpoints, in parallel). If the
+player fails without saying why, the stream URL itself is requested to get its
+HTTP status and content type; after a transport error, the internet is checked
+again in case it just dropped.
 
-**While playing.** A player error, a live stream that "ends", buffering longer
-than `bufferingTimeout` (20 s) or a lost network starts a reconnect. The
-audio service stays in the foreground while it does, because Android 12 and
-later won't let an app bring it back from the background.
+While playing, a player error, a live stream that "ends", buffering longer
+than `bufferingTimeout` (20 s) or a lost network starts a reconnect. The audio
+service stays in the foreground meanwhile, because Android 12 and later won't
+let an app bring it back from the background. With the default policy the
+attempts come after 1, 2, 4, 8, 16, 30, 30 and 30 seconds; with no network at
+all it waits up to `offlineWait` (3 min) and tries as soon as the network
+returns.
 
-With the default policy, the attempts come after these waits:
+A failed `play()` is not retried: the state shows the failure and the app
+decides, for example with `retry()`. After a drop, the radio reconnects on its
+own unless the failure rules it out:
 
-| Attempt | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
-|---|---|---|---|---|---|---|---|---|
-| Wait | 1 s | 2 s | 4 s | 8 s | 16 s | 30 s | 30 s | 30 s |
-
-Each attempt re-checks the network first. While the device has no network at
-all, no attempts are made: the radio waits up to `offlineWait` (3 min) and
-tries the moment the network returns. After the last attempt the status
-becomes `error` or `noInternet` and a `RadioFailed(gaveUp: true)` event is
-sent. `accessDenied`, `streamRejected`, `invalidStream` and
-`audioUnavailable` are not retried.
-
-**Interruptions.**
-
-| What happens | Result |
-|---|---|
-| Another app ducks the audio | volume drops to `duckVolume` (0.3) and comes back |
-| A call or a short sound (transient focus loss) | pauses, resumes when it ends |
-| Another app starts playing (permanent focus loss) | pauses for good |
-| Headphones or Bluetooth disconnect | pauses at once |
-| The user pauses or stops during an interruption | no automatic resume |
-
-**Pause and resume.** A pause shorter than `liveResumeWindow` (30 s) resumes
-where it stopped. A longer one reconnects to the live edge.
-
-**Watchdog.** If the radio wants to play but has no audio for `stallWatchdog`
-(6 min), it pauses to release the wake lock and the foreground service.
-
-**Stop.** `stop()` cancels the pending retry and any attempt in flight. Every
-async step checks a generation token before it changes anything, so a slow
-response that arrives after a stop can't restart playback.
-
-## Failures
-
-| `RadioFailure` | Meaning | Retried |
+| `RadioFailure` | Meaning | Reconnects |
 |---|---|---|
 | `noNetwork` | no Wi-Fi or mobile network | waits for the network |
 | `internetUnavailable` | a network without internet | yes |
@@ -323,10 +298,8 @@ response that arrives after a stop can't restart playback.
 | `playbackFailed` | the player failed for an unknown reason | yes |
 | `audioUnavailable` | the audio service couldn't start | no |
 
-`failure.isOffline` is true for the first two, which is usually where a UI
-shows "you're offline" instead of an error. Platform player codes (ExoPlayer
-error types, `NSURLError` codes) are mapped to these categories and never
-reported as HTTP status codes.
+Platform player codes (ExoPlayer error types, `NSURLError` codes) are mapped to
+these categories and never reported as HTTP status codes.
 
 ## Configuration
 
@@ -357,72 +330,40 @@ final radio = ResilientRadio(
 |---|---|---|
 | `reconnect` | `ReconnectPolicy()` | backoff, attempts, `offlineWait`, `bufferingTimeout` |
 | `notification` | channel `resilient_radio.playback` | Android channel, icon and color |
-| `content` | `RadioContent.music` | `speech` for talk or recitation: other spoken audio pauses it instead of ducking |
-| `internetProbes` | Google and Cloudflare `generate_204` | your own endpoints, or `[]` to skip the internet check |
-| `internetProbeTimeout` | 5 s | |
-| `streamProbeTimeout` | 8 s | |
+| `content` | `RadioContent.music` | `speech` for talk or recitation |
+| `internetProbes` | Google and Cloudflare `generate_204` | your own endpoints, or `[]` to skip the check |
+| `internetProbeTimeout` | 5 s | per internet probe |
+| `streamProbeTimeout` | 8 s | for the request to the stream when diagnosing a failure |
 | `loadTimeout` | 20 s | how long the player may take to open the stream |
-| `liveResumeWindow` | 30 s | |
-| `stallWatchdog` | 6 min | |
-| `duckVolume` | 0.3 | |
+| `liveResumeWindow` | 30 s | shorter pauses resume in place, longer ones reconnect |
+| `stallWatchdog` | 6 min | how long it may go without audio before pausing to release the device |
+| `duckVolume` | 0.3 | the volume while another app ducks the radio |
 | `startTimeout` | 10 s | how long the audio service may take to start |
-| `logger` | none | |
+| `logger` | none | receives info, warning and error messages |
 
 For another backoff curve, extend `ReconnectPolicy` and override `delayFor`.
 
-## With your state management
-
-The radio is a plain object with streams, so adapters stay small.
-
-```dart
-class RadioCubit extends Cubit<RadioState> {
-  RadioCubit(this.radio) : super(radio.state) {
-    _subscription = radio.stateStream.listen(emit);
-  }
-
-  final ResilientRadio radio;
-  late final StreamSubscription<RadioState> _subscription;
-
-  @override
-  Future<void> close() async {
-    await _subscription.cancel();
-    return super.close();
-  }
-}
-```
-
-```dart
-final radioStateProvider = StreamProvider<RadioState>(
-  (ref) => ref.watch(radioProvider).stateStream,
-);
-```
-
-## Built-in stations
-
-There are none in the package itself. The example app plays Quran Radio
-Cairo, a stream hosted by a third party (RadioJar); check a stream's terms
-before you ship it in an app.
-
 ## Limitations
 
-- One radio per app. audio_service starts once per process, so the first
+- One radio per app: audio_service starts once per process, so the first
   radio's notification settings are the ones used.
 - An app that already uses audio_service for other audio can't add this
   radio's handler next to its own.
 - Apps that open a second Flutter engine in its own Activity (a full-screen
-  alarm, for example) can hit an audio_service 0.18 issue where that
-  Activity creates a hidden engine and the next launch shows a black screen.
-  If you do this, check audio_service's issue tracker before shipping.
+  alarm, for example) can hit an audio_service 0.18 issue where that Activity
+  creates a hidden engine and the next launch shows a black screen. Check
+  audio_service's issue tracker before shipping such an app.
 - HLS is detected by `.m3u8` in the URL, as in just_audio.
 - No ICY "now playing" metadata and no custom HTTP headers yet.
-- Android and iOS only.
-- The internet check contacts Google and Cloudflare. Point
-  `internetProbes` at your own endpoint if that matters to your users.
+- The internet check contacts Google and Cloudflare. Point `internetProbes`
+  at your own endpoint if that matters to your users.
 
 ## Example
 
-[`example/`](example) has a small app with a station picker, a custom URL
-field, the live state and an event log.
+[`example/`](example) has the app shown above: a station picker, a custom URL
+field checked with `StreamProbe`, the live state and an event log. Its default
+station, Quran Radio Cairo, is a stream hosted by a third party (RadioJar);
+check a stream's terms before you ship it in an app.
 
 ## License
 
